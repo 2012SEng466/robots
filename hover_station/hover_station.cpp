@@ -7,13 +7,17 @@
 #define ONBOARD_LED_PIN					13
 #define INDICATOR_LED					6
 
+// Polling delay for loop, depending on whether desired height is met
+#define POLLING_DELAY_STABLE			1500
+#define POLLING_DELAY_FAST				750
+
 #define MOTOR_MIN_OPERATING_SPEED		85
 #define MOTOR_MAX_SPEED					175
 // motor increments as slowly as possible. This gives us more precision.
 #define MOTOR_INCREMENT					1
 
 #define DISTANCE_LOW					1
-#define DISTANCE_HIGH					16
+#define DISTANCE_HIGH					20
 // Add this if you want the ball to be considered at desired height when it is off
 #define DISTANCE_ERROR_MARGIN			0
 
@@ -24,12 +28,11 @@ uint8_t station_addr[5] = { 0x66, 0x66, 0x66, 0x66, 0x66 };
 
 Servo motor;
 int motor_current_speed = 0; // global var that persistently tracks the motor's speed
-int zero_distance_count = 0; // tracks how many distances of 0 in a row we see
 
 // Calibrations for the ball balancing
 int desired_distance_current = 8; // Persistently tracks desired distance. Start it somewhere.
 
-// returns distance in centimetres of sensed object.
+// returns distance in inches of sensed object.
 int doSonar()
 {
 	// Sonar setup stuff
@@ -69,7 +72,7 @@ void motorSpeedUp()
 {
 	int increment;
 	// set increment to 3 depending on speed
-	increment = (motor_current_speed <= 95)? 3 : MOTOR_INCREMENT;
+	increment = motor_current_speed <= 90 ? 3 : MOTOR_INCREMENT;
 	motorSetSpeed(motor_current_speed + increment);
 }
 
@@ -81,11 +84,6 @@ void motorSlowDown()
 void motorStop()
 {
 	motor.write(0);
-}
-
-void motorReturnToStart(int start_speed)
-{
-	motorSetSpeed(start_speed);
 }
 
 // !!! Very important! Motor has to start at 0 and reach desired speed gradually.
@@ -184,8 +182,15 @@ void recv_radio_setup() {
 	Radio_Configure(RADIO_2MBPS, RADIO_HIGHEST_POWER);
 }
 
+/**
+ * Triggers the sonar and performs motor logic to increase or
+ * decrease the speed.
+ * Returns true if the motor has changed speed or false if stayed
+ */
 int alterMotor(int desired_distance)
 {
+	static int zero_distance_count = 0; // tracks number zeros seen
+
 	Serial.print("Desired distance is: ");
 	Serial.println(desired_distance);
 
@@ -194,7 +199,7 @@ int alterMotor(int desired_distance)
 	int distance = doSonar();
 	if (distance == 0) {
 		if (zero_distance_count == 5) {
-			motorReturnToStart(MOTOR_MIN_OPERATING_SPEED);
+			motorSetSpeed(MOTOR_MIN_OPERATING_SPEED);
 		} else {
 			zero_distance_count++;
 		}
@@ -203,19 +208,11 @@ int alterMotor(int desired_distance)
 		zero_distance_count = 0;
 	}
 
-	int loop_delay_time;
 	if (distance >= (desired_distance - DISTANCE_ERROR_MARGIN) && distance <= (desired_distance + DISTANCE_ERROR_MARGIN)) {
-		Serial.print("Distance '");
-		Serial.print(distance);
-		Serial.print("' is within ");
-		Serial.print(desired_distance);
-		Serial.print(" +- ");
-		Serial.println(DISTANCE_ERROR_MARGIN);
 		digitalWrite(INDICATOR_LED, HIGH);
-		loop_delay_time = 1000;
+		return 0;
 	} else {
 		digitalWrite(INDICATOR_LED, LOW);
-		loop_delay_time = 250;
 		if (distance <= desired_distance) {
 			Serial.println("Speeding up!");
 			motorSpeedUp();
@@ -223,8 +220,8 @@ int alterMotor(int desired_distance)
 			Serial.println("Slowing down!");
 			motorSlowDown();
 		}
+		return 1;
 	}
-	return loop_delay_time;
 }
 
 void setNewDesiredDistance(int msg)
@@ -282,16 +279,31 @@ void setup()
 
 int main()
 {
+	int msgInt, loop_delay;
+
 	setup();
-	int msgInt;
+
 	for (;;) {
-		Serial.println("in loop");
+
+		Serial.println("---------------------------------");
+
+		// Get Radio Message
 		msgInt = radio_check();
-		Serial.print("**[RADIO] Received: ");
-		Serial.println(msgInt);
-		setNewDesiredDistance(msgInt);
-		int loop_delay = alterMotor(desired_distance_current);
-		delay(500 + loop_delay);
+
+		// If message received, update desired height
+		if (msgInt != -1) {
+			Serial.print("Received ");
+			Serial.println(msgInt);
+			setNewDesiredDistance(msgInt);
+		}
+
+		// Poll slower when desired height reached
+		if (alterMotor(desired_distance_current))
+			loop_delay = POLLING_DELAY_FAST;
+		else
+			loop_delay = POLLING_DELAY_STABLE;
+
+		delay(loop_delay);
 	}
 
 	return 0;

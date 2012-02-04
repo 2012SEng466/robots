@@ -34,6 +34,8 @@ void radio_begin()
 
 void radio_send(char * msg)
 {
+	int waitedFor = 0;
+
 	packet.type = MESSAGE;
 	memcpy(packet.payload.message.address, my_addr, RADIO_ADDRESS_LENGTH);
 	packet.payload.message.messageid = 55;
@@ -41,7 +43,14 @@ void radio_send(char * msg)
 	Radio_Transmit(&packet, RADIO_WAIT_FOR_TX);
 
 	// wait for retransmit
-	while (!rxflag);
+	while (!rxflag) {
+		waitedFor++;
+		delay(50);
+		if (waitedFor > 10) {
+			Serial.println("ERROR: Did not receive ACK.");
+			return;
+		}
+	}
 
 	if (Radio_Receive(&packet) != RADIO_RX_MORE_PACKETS)
 	{
