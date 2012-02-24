@@ -21,6 +21,9 @@
 // Add this if you want the ball to be considered at desired height when it is off
 #define DISTANCE_ERROR_MARGIN			0
 
+// Analog pins
+#define POTENTIOMETER 					7
+
 // this must be volatile because it's used in an ISR (radio_rxhandler).
 volatile uint8_t rxflag = 0;
 radiopacket_t packet;
@@ -270,6 +273,7 @@ void setup()
 	// Radio
 	recv_radio_setup();
 
+
 	// Sonar
 	pinMode(ECHO_PIN, INPUT);
 	pinMode(TRIG_PIN, OUTPUT);
@@ -279,10 +283,12 @@ void setup()
 
 int main()
 {
-	int msgInt, loop_delay;
+	int msgInt, loop_delay, pot, potPrev;
 
 	setup();
 
+	// Get starting position of potentiometer
+	potPrev = analogRead(POTENTIOMETER);
 	for (;;) {
 
 		Serial.println("---------------------------------");
@@ -295,6 +301,18 @@ int main()
 			Serial.print("Received ");
 			Serial.println(msgInt);
 			setNewDesiredDistance(msgInt);
+		}
+
+		// Potentiometer, reads 0-1023
+		pot = analogRead(POTENTIOMETER);
+		if (pot != potPrev) {
+			// If potentiometer has changed, adjust height
+			Serial.print("POT: ");
+			Serial.println(pot);
+
+			// Set new desired hight.
+			desired_distance_current = pot / 68;
+			potPrev = pot;
 		}
 
 		// Poll slower when desired height reached
